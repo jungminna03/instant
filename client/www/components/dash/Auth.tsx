@@ -1,5 +1,9 @@
 import { ReactNode, useState } from 'react';
-import { sendMagicCode, verifyMagicCode } from '../../lib/auth';
+import {
+  passwordLogin,
+  sendMagicCode,
+  verifyMagicCode,
+} from '../../lib/auth';
 import {
   Button,
   Content,
@@ -69,6 +73,46 @@ function CodeStep(props: {
         Back to Login
       </Button>
     </form>
+  );
+}
+
+// EPL fork: password-only login. Each password opens a different workspace
+// account (see lib/passwordLogin.server.ts).
+function PasswordStep(props: {
+  password: string;
+  onPasswordChange: (text: string) => void;
+  onSubmit: () => void;
+  disabled: boolean | undefined;
+  error?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          props.onSubmit();
+        }}
+      >
+        <ScreenHeading>비밀번호로 로그인</ScreenHeading>
+        <Content>워크스페이스 비밀번호를 입력하세요.</Content>
+        <TextInput
+          autoFocus
+          className="w-full rounded-sm"
+          placeholder="비밀번호"
+          type="password"
+          value={props.password}
+          onChange={(_) => props.onPasswordChange(_)}
+          error={props.error}
+        />
+        <Button
+          type="submit"
+          disabled={props.disabled || props.password.length === 0}
+        >
+          로그인
+        </Button>
+      </form>
+    </div>
   );
 }
 
@@ -209,6 +253,29 @@ export default function Auth(props: {
     );
   };
 
+  // Self-hosted EPL deployments log in with a workspace password only. The
+  // superuser is itself a password workspace, so email login isn't offered.
+  const usePassword = isSelfHosted;
+  const [password, setPassword] = useState('');
+
+  const submitPassword = () => {
+    setState((prev) => ({ ...prev, isLoading: true, error: undefined }));
+    passwordLogin({ password }).then(
+      ({ token }) => {
+        setState((prev) => ({ ...prev, isLoading: false }));
+        props.onVerified?.({ token, ticket: props.ticket });
+      },
+      (err: InstantIssue) => {
+        setPassword('');
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: errorFromPasswordLogin(err),
+        }));
+      },
+    );
+  };
+
   const onEmailChange = (email: string) =>
     setState((prev) => ({ ...prev, email: email }));
 
@@ -231,7 +298,15 @@ export default function Auth(props: {
           <span className="font-mono text-sm lowercase">Instant</span>
         </span>
         <div className="flex flex-col gap-4">
-          {sentEmail ? (
+          {usePassword ? (
+            <PasswordStep
+              password={password}
+              onPasswordChange={setPassword}
+              onSubmit={submitPassword}
+              disabled={isLoading}
+              error={error}
+            />
+          ) : sentEmail ? (
             <CodeStep
               sentEmail={sentEmail}
               disabled={isLoading}
@@ -273,6 +348,20 @@ function errorFromVerifyMagicCode(res: InstantIssue): string {
       return "This code isn't valid. Please check your email for the latest code.";
     case 'record-expired':
       return 'This code has expired. Please request a new code.';
+    default:
+      return magicCodeDefaultError();
+  }
+}
+
+function errorFromPasswordLogin(res: InstantIssue): string {
+  const errorType: string | undefined = res.body?.type;
+  switch (errorType) {
+    case 'invalid-password':
+      return '비밀번호가 올바르지 않습니다.';
+    case 'rate-limited':
+      return '시도 횟수가 너무 많습니다. 몇 분 뒤 다시 시도하세요.';
+    case 'disabled':
+      return '비밀번호 로그인이 설정되지 않았습니다. 서버 관리자에게 문의하세요.';
     default:
       return magicCodeDefaultError();
   }

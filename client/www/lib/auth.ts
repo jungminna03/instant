@@ -199,6 +199,19 @@ export async function verifyMagicCode({
   return res;
 }
 
+// EPL fork: password-only login (app/api/password-login). Same-origin call to
+// the dashboard's own server, which mints a fresh token for the workspace.
+export async function passwordLogin({ password }: { password: string }) {
+  const res: { token: string; user: AuthUser; workspace: string } =
+    await jsonFetch('/api/password-login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+  setAuthInfo({ token: res.token, user: res.user });
+  return res;
+}
+
 export async function signOut() {
   try {
     const token = _AUTH_INFO.token;
